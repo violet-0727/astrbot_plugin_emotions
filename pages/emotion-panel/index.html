@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>她自己的情绪</title>
+<style>
+  :root{
+    --bg:#eef2f8; --panel:#fff; --fg:#151d29; --muted:#6d7c92; --line:#dde5f1; --field:#f5f8fd;
+    --accent:#2f6feb; --soft:#e9f1ff; --warm:#e08a3c; --cool:#5b6f8f; --ok:#1f9d6b; --warn:#c2410c;
+    --tone:#2f6feb; --tone2:#63a4ff;
+    --sh:0 1px 2px rgba(20,40,80,.05), 0 18px 40px -26px rgba(20,40,80,.35);
+  }
+  [data-theme="dark"]{
+    --bg:#0a1017; --panel:#111a26; --fg:#e7eefb; --muted:#8ba0bd; --line:#1d2a3c; --field:#0f1824;
+    --accent:#6ba6ff; --soft:#152740; --warm:#e0a75f; --cool:#8ea6c8; --ok:#4ade80; --warn:#fb923c;
+    --sh:0 1px 2px rgba(0,0,0,.6), 0 22px 44px -28px rgba(0,0,0,.95);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none !important}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:28px 20px 90px}
+
+  /* ---------- 顶部 ---------- */
+  .top{display:flex;align-items:baseline;gap:12px;margin-bottom:18px}
+  .top h1{margin:0;font-size:22px;letter-spacing:.5px}
+  .top .sub{color:var(--muted);font-size:13px}
+  .top .sp{flex:1}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px;
+    box-shadow:0 0 0 3px rgba(31,157,107,.15)}
+
+  /* ---------- 主卡 ---------- */
+  .hero{position:relative;overflow:hidden;border-radius:22px;padding:26px 26px 22px;color:#fff;
+    background:linear-gradient(135deg,var(--tone2),var(--tone));box-shadow:0 24px 50px -30px rgba(20,40,90,.7);
+    display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center}
+  .hero::after{content:"";position:absolute;right:-70px;top:-90px;width:260px;height:260px;border-radius:50%;
+    background:rgba(255,255,255,.12)}
+  .hero::before{content:"";position:absolute;left:-40px;bottom:-110px;width:220px;height:220px;border-radius:50%;
+    background:rgba(255,255,255,.08)}
+  .ring{position:relative;width:132px;height:132px;flex:none;z-index:1}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .mid{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+  .ring .mid b{display:block;font-size:19px;line-height:1.2;letter-spacing:.5px}
+  .ring .mid span{font-size:11px;opacity:.8}
+  .hero-body{z-index:1;min-width:0}
+  .hero-body h2{margin:0 0 4px;font-size:24px;letter-spacing:.6px}
+  .hero-body .desc{font-size:12.5px;opacity:.85;margin-bottom:16px}
+  .meters{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  .meter{background:rgba(255,255,255,.16);border-radius:12px;padding:9px 12px}
+  .meter .k{font-size:11px;opacity:.85;display:flex;justify-content:space-between}
+  .meter .bar{height:5px;border-radius:99px;background:rgba(255,255,255,.28);margin-top:7px;overflow:hidden}
+  .meter .bar i{display:block;height:100%;border-radius:99px;background:#fff;transition:width .5s}
+
+  /* ---------- 分区 ---------- */
+  .sec{margin-top:22px}
+  .sec h3{margin:0 0 12px;font-size:14px;color:var(--muted);font-weight:600;letter-spacing:1.2px;
+    text-transform:uppercase;display:flex;align-items:center;gap:10px}
+  .sec h3::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  .people{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  .pcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:var(--sh);
+    display:flex;gap:12px;align-items:flex-start}
+  .pav{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;font-weight:600;font-size:16px;
+    background:var(--soft);color:var(--accent);flex:none}
+  .pinfo{min-width:0;flex:1}
+  .pinfo .pn{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .pinfo .pn b{font-size:15px}
+  .pinfo .pn span{font-size:11.5px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+  .ptag{display:inline-block;margin-top:5px;font-size:12px;padding:1px 9px;border-radius:999px;
+    background:var(--field);border:1px solid var(--line);color:var(--muted)}
+  .pline{margin-top:9px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+  .pline .track{flex:1;height:5px;border-radius:99px;background:var(--field);position:relative;overflow:hidden}
+  .pline .track i{position:absolute;top:0;bottom:0;border-radius:99px;background:var(--accent);opacity:.75}
+  .pline .track::after{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line)}
+
+  .timeline{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh);
+    padding:8px 18px 8px 26px;position:relative}
+  .timeline::before{content:"";position:absolute;left:14px;top:16px;bottom:16px;width:1px;background:var(--line)}
+  .ev{position:relative;padding:9px 0;display:flex;gap:12px;align-items:baseline;font-size:13px}
+  .ev::before{content:"";position:absolute;left:-16px;top:16px;width:7px;height:7px;border-radius:50%;
+    background:var(--accent);opacity:.8}
+  .ev .when{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;flex:none;width:76px}
+  .ev .what{flex:1;min-width:0}
+  .ev .delta{font-variant-numeric:tabular-nums;font-size:12px;flex:none}
+  .ev .delta.up{color:var(--ok)}
+  .ev .delta.down{color:var(--warn)}
+  .empty{color:var(--muted);font-size:13px;padding:14px 0}
+
+  /* ---------- 调试 ---------- */
+  .debug{margin-top:22px;background:var(--panel);border:1px dashed var(--line);border-radius:16px;padding:16px 18px}
+  .debug summary{cursor:pointer;font-size:13px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px}
+  .debug summary::-webkit-details-marker{display:none}
+  .debug summary::before{content:"▸";transition:.2s;display:inline-block}
+  .debug[open] summary::before{transform:rotate(90deg)}
+  .dbg{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:14px;align-items:end}
+  .dbg .field label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px}
+  .dbg select,.dbg input[type=number]{width:100%;font:inherit;padding:8px 10px;border-radius:9px;
+    border:1px solid var(--line);background:var(--field);color:var(--fg);outline:none}
+  .dbg input[type=range]{width:100%}
+  button{font:inherit;cursor:pointer;border-radius:9px;padding:8px 14px;border:1px solid var(--line);
+    background:var(--panel);color:var(--fg);transition:.15s}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:var(--warn)}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(10px);background:var(--panel);
+    border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 16px;border-radius:10px;
+    box-shadow:var(--sh);opacity:0;pointer-events:none;transition:.2s;font-size:13px;z-index:80}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.error{border-left-color:var(--warn)}
+  .banner{display:none;margin-bottom:14px;padding:10px 14px;border-radius:10px;background:var(--soft);
+    color:var(--accent);font-size:13px}
+  .banner.show{display:block}
+  @media (max-width:680px){
+    .hero{grid-template-columns:1fr;justify-items:center;text-align:center}
+    .meters{grid-template-columns:1fr 1fr}
+    .wrap{padding:20px 14px 80px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>她自己的情绪</h1>
+    <span class="sub"><span class="dot"></span><span id="updated">刚刚</span></span>
+    <div class="sp"></div>
+    <button class="ghost" id="btn-refresh">刷新</button>
+  </div>
+
+  <div class="banner" id="banner">面板桥接还没就绪，正在重试…</div>
+
+  <div class="hero" id="hero">
+    <div class="ring">
+      <svg width="132" height="132">
+        <circle cx="66" cy="66" r="56" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="9"></circle>
+        <circle id="moodArc" cx="66" cy="66" r="56" fill="none" stroke="#fff" stroke-width="9"
+                stroke-linecap="round" stroke-dasharray="351.9" stroke-dashoffset="175.9"></circle>
+      </svg>
+      <div class="mid"><b id="moodNum">0.00</b><span>心情</span></div>
+    </div>
+    <div class="hero-body">
+      <h2 id="overall">平常</h2>
+      <div class="desc">整体基调：决定她今天说话的大方向；对每个人的态度在下面</div>
+      <div class="meters">
+        <div class="meter"><div class="k"><span>精力</span><b id="mEnergy">0</b></div>
+          <div class="bar"><i id="bEnergy" style="width:0%"></i></div></div>
+        <div class="meter"><div class="k"><span>耐心</span><b id="mPatience">0</b></div>
+          <div class="bar"><i id="bPatience" style="width:0%"></i></div></div>
+        <div class="meter"><div class="k"><span>黏人</span><b id="mCling">0</b></div>
+          <div class="bar"><i id="bCling" style="width:0%"></i></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3>对不同的人</h3>
+    <div class="people" id="people"></div>
+    <div class="empty" id="peopleEmpty" hidden>还没有记录到的人。有人跟她说话之后，这里会出现。</div>
+  </div>
+
+  <div class="sec">
+    <h3>最近的变化</h3>
+    <div class="timeline" id="timeline"></div>
+  </div>
+
+  <details class="debug">
+    <summary>调试 · 手动调一下（只影响她自己，不发给任何人）</summary>
+    <div class="dbg">
+      <div class="field"><label>范围</label>
+        <select id="dScope">
+          <option value="global">整体</option>
+          <option value="user">对某个用户</option>
+        </select></div>
+      <div class="field"><label>维度</label>
+        <select id="dDim">
+          <option value="mood">心情</option>
+          <option value="energy">精力</option>
+          <option value="patience">耐心</option>
+          <option value="cling">黏人</option>
+          <option value="warmth">好感（仅用户）</option>
+        </select></div>
+      <div class="field" id="qqField" hidden><label>用户</label>
+        <select id="dQQ"></select></div>
+      <div class="field"><label>变化 <b id="dVal">+0.10</b></label>
+        <input id="dDelta" type="range" min="-0.3" max="0.3" step="0.05" value="0.1" /></div>
+      <div><button class="primary" id="btn-apply">应用</button></div>
+      <div><button class="danger" id="btn-reset">重置整体</button></div>
+    </div>
+  </details>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  const API = "/astrbot_plugin_emotions";
+  let bridge = null;
+  let state = null;
+
+  const $ = (id) => document.getElementById(id);
+  const ep = (p) => String(p || "").replace(/^\/+/, "");
+
+  async function ensureBridge() {
+    if (window.AstrBotPluginPage) { bridge = window.AstrBotPluginPage; return true; }
+    const t0 = Date.now();
+    while (Date.now() - t0 < 6000) {
+      await new Promise((r) => setTimeout(r, 60));
+      if (window.AstrBotPluginPage) { bridge = window.AstrBotPluginPage; return true; }
+    }
+    return false;
+  }
+  function get(path) {
+    if (bridge && bridge.apiGet) return bridge.apiGet(ep(path));
+    return fetch("/api/plug" + API + path, { credentials: "include" }).then((r) => r.json());
+  }
+  function post(path, body) {
+    if (bridge && bridge.apiPost) return bridge.apiPost(ep(path), body);
+    return fetch("/api/plug" + API + path, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then((r) => r.json());
+  }
+  function toast(msg, bad) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.className = "toast show" + (bad ? " error" : "");
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => (el.className = "toast"), 2200);
+  }
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  function ago(ts) {
+    const sec = Date.now() / 1000 - Number(ts || 0);
+    if (!isFinite(sec) || sec < 0) return "";
+    if (sec < 60) return "刚刚";
+    if (sec < 3600) return Math.round(sec / 60) + " 分钟前";
+    if (sec < 86400) return Math.round(sec / 3600) + " 小时前";
+    return Math.round(sec / 86400) + " 天前";
+  }
+  function clock(ts) {
+    const d = new Date(Number(ts || 0) * 1000);
+    if (!isFinite(d.getTime())) return "";
+    const p = (x) => String(x).padStart(2, "0");
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function toneFor(mood) {
+    if (mood >= 0.35) return ["#e8a13f", "#f0c26a"];
+    if (mood >= 0.1) return ["#2f6feb", "#63a4ff"];
+    if (mood > -0.2) return ["#3d5d8f", "#6b8bb8"];
+    return ["#33455f", "#5b6f8f"];
+  }
+
+  function render() {
+    if (!state) return;
+    const g = state.global || {};
+    const mood = Number(g.mood || 0);
+    const [t1, t2] = toneFor(mood);
+    document.documentElement.style.setProperty("--tone", t1);
+    document.documentElement.style.setProperty("--tone2", t2);
+
+    $("overall").textContent = state.overall || "平常";
+    $("moodNum").textContent = (mood >= 0 ? "+" : "") + mood.toFixed(2);
+    const pct = (mood + 1) / 2;
+    const circ = 351.9;
+    $("moodArc").setAttribute("stroke-dashoffset", String(circ * (1 - pct)));
+
+    const set = (key, val) => {
+      $("m" + key).textContent = Number(val).toFixed(2);
+      $("b" + key).style.width = Math.round(Number(val) * 100) + "%";
+    };
+    set("Energy", g.energy || 0);
+    set("Patience", g.patience || 0);
+    set("Cling", g.cling || 0);
+
+    const users = state.users || [];
+    $("peopleEmpty").hidden = users.length > 0;
+    $("people").innerHTML = users.map((u) => {
+      const w = Number(u.warmth || 0);
+      const left = w >= 0 ? 50 : 50 + w * 50;
+      const width = Math.abs(w) * 50;
+      return '<div class="pcard">'
+        + '<div class="pav">' + esc((u.name || u.qq || "?").slice(0, 1)) + '</div>'
+        + '<div class="pinfo">'
+        + '<div class="pn"><b>' + esc(u.name || u.qq) + '</b><span>' + esc(u.qq) + '</span></div>'
+        + '<div class="ptag">' + esc(u.tag) + '</div>'
+        + '<div class="pline"><span>好感</span>'
+        + '<span class="track"><i style="left:' + left + '%;width:' + width + '%"></i></span>'
+        + '<span>' + (w >= 0 ? "+" : "") + w.toFixed(2) + '</span></div>'
+        + '<div class="pline" style="margin-top:4px"><span>说过 ' + (u.talks || 0) + ' 次</span>'
+        + '<span style="margin-left:auto">' + ago(u.last_seen) + '</span></div>'
+        + '</div></div>';
+    }).join("");
+
+    const events = (state.events || []).slice().reverse();
+    $("timeline").innerHTML = events.length ? events.map((e) => {
+      const up = Number(e.delta) >= 0;
+      const who = e.scope === "user"
+        ? ((users.find((u) => u.qq === e.qq) || {}).name || e.qq || "某人")
+        : "整体";
+      const dim = ({ mood: "心情", energy: "精力", patience: "耐心", cling: "黏人", warmth: "好感" })[e.dim] || e.dim;
+      return '<div class="ev"><span class="when">' + clock(e.t) + '</span>'
+        + '<span class="what">' + esc(who) + ' · ' + esc(dim)
+        + (e.reason ? ' <span style="color:var(--muted)">' + esc(e.reason) + '</span>' : '') + '</span>'
+        + '<span class="delta ' + (up ? "up" : "down") + '">' + (up ? "+" : "") + Number(e.delta).toFixed(2) + '</span></div>';
+    }).join("") : '<div class="empty">还没有变化记录。她被人触动时，这里会出现。</div>';
+
+    const sel = $("dQQ");
+    const current = sel.value;
+    sel.innerHTML = users.map((u) => '<option value="' + esc(u.qq) + '">' + esc(u.name || u.qq) + '</option>').join("");
+    if (current) sel.value = current;
+
+    $("updated").textContent = "更新于 " + clock(state.ts || Date.now() / 1000);
+  }
+
+  async function load() {
+    try {
+      const data = await get("state");
+      if (!data || !data.ok) throw new Error("读取失败");
+      state = data;
+      render();
+    } catch (e) {
+      $("banner").classList.add("show");
+      $("banner").textContent = "加载失败：" + (e && e.message ? e.message : e);
+    }
+  }
+
+  $("dScope").onchange = () => {
+    $("qqField").hidden = $("dScope").value !== "user";
+  };
+  $("dDelta").oninput = () => {
+    const v = Number($("dDelta").value);
+    $("dVal").textContent = (v >= 0 ? "+" : "") + v.toFixed(2);
+  };
+  $("btn-apply").onclick = async () => {
+    const scope = $("dScope").value;
+    const dim = $("dDim").value;
+    const delta = Number($("dDelta").value);
+    try {
+      const res = await post("shift", {
+        scope: scope, dim: dim, delta: delta,
+        qq: scope === "user" ? $("dQQ").value : "",
+        reason: "面板手动调整"
+      });
+      if (!res || !res.ok) throw new Error((res && res.error) || "调整失败");
+      state = Object.assign({ ok: true, ts: Date.now() / 1000 }, res.state || {});
+      render();
+      toast("调好了");
+    } catch (e) { toast(e.message || "调整失败", true); }
+  };
+  $("btn-reset").onclick = async () => {
+    if (!confirm("把整体情绪重置回基线？")) return;
+    const res = await post("reset", { what: "global" });
+    if (res && res.ok) { state = Object.assign({ ok: true, ts: Date.now() / 1000 }, res.state || {}); render(); toast("已重置"); }
+    else toast("重置失败", true);
+  };
+  $("btn-refresh").onclick = load;
+
+  (async () => {
+    const ok = await ensureBridge();
+    if (!ok) $("banner").classList.add("show");
+    if (bridge && bridge.ready) {
+      try {
+        await bridge.ready();
+        const ctx = bridge.getContext && bridge.getContext();
+        if (ctx && typeof ctx.isDark === "boolean") {
+          document.documentElement.setAttribute("data-theme", ctx.isDark ? "dark" : "light");
+        }
+      } catch (e) {}
+    }
+    await load();
+    setInterval(load, 30000);
+  })();
+})();
+</script>
+</body>
+</html>

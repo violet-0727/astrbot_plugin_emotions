@@ -1,0 +1,24 @@
+name: astrbot_plugin_emotions
+display_name: 她自己的情绪
+short_desc: 全局基调 + 对每个人的态度，会随时间平复
+desc: >
+  她自己的情绪。两套状态分开存：全局心情决定整体说话基调，对每个用户的好感决定对这个人什么态度。
+  心情低 + 关系远 → 冷淡少理；心情低 + 关系近 → 黏人找安慰。
+  所有维度按半衰期衰减回基线，一次吵架不会永久低气压。
+  注入走临时内容块，不改 system_prompt；自带情绪面板（心情环、精力/耐心/黏人、人物卡、变化时间线）。
+version: 0.1.0
+author: 若剑清
+repo: ""
+tags:
+  - emotion
+  - companion
+  - mood
+  - personality
+help: |
+  面板：插件管理 → 她自己的情绪 → 情绪
+
+  聊天里她会按当前状态调整语气，不需要手动操作。
+  命令：/情绪 看当前状态
+pages:
+  - name: emotion-panel
+    title: 情绪

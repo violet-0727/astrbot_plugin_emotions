@@ -1,0 +1,17 @@
+{
+  "enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "启用情绪系统"
+  },
+  "inject_enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "每轮把当前状态作为临时提示注入（不改 system_prompt）"
+  },
+  "track_users": {
+    "type": "bool",
+    "default": true,
+    "description": "记录说话的人的名字，用于区分「对不同人的态度」"
+  }
+}
