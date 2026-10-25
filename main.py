@@ -25,6 +25,17 @@ from .state import EmotionState
 from .tools import EmotionShiftTool
 
 PLUGIN_NAME = "astrbot_plugin_emotions"
+
+RESIDUAL_TEXT = {
+    "mood": {True: "心情好了一点", False: "心情被拉低了一点"},
+    "patience": {True: "耐心回来了", False: "耐心被磨掉了一点"},
+    "warmth": {True: "对这个人更亲近了一点", False: "对这个人有点疏远"},
+    "cling": {True: "有点想他", False: "没那么黏了"},
+    "energy": {True: "精神好了点", False: "有点累了"},
+}
+
+NEG_WORDS = ("笨", "蠢", "烦", "滚", "讨厌", "闭嘴", "别说了", "没用", "傻", "无聊")
+POS_WORDS = ("可爱", "喜欢", "厉害", "好乖", "棒", "真好", "抱抱", "想你", "谢谢")
 API_PREFIX = f"/{PLUGIN_NAME}"
 
 try:
@@ -37,7 +48,7 @@ except Exception:  # pragma: no cover
     PLUGIN_NAME,
     "若剑清",
     "她自己的情绪：全局基调 + 对每个人的态度，会随时间慢慢平复。",
-    "0.1.0",
+    "0.2.0",
     "",
 )
 class EmotionsPlugin(Star):
@@ -51,6 +62,8 @@ class EmotionsPlugin(Star):
         self.inject_enabled = self._bool("inject_enabled", True)
         self.track_users = self._bool("track_users", True)
         self._seen: set[str] = set()
+        self._cool: dict[str, float] = {}
+        self._recent: dict[str, list[float]] = {}
 
         self.tools: list[Any] = [EmotionShiftTool(state=self.state)]
         self.context.add_llm_tools(*self.tools)
@@ -79,6 +92,13 @@ class EmotionsPlugin(Star):
         except Exception:
             payload = None
         return payload if isinstance(payload, dict) else {}
+
+    def _cool_ok(self, key: str, seconds: float) -> bool:
+        now = time.time()
+        if now - float(self._cool.get(key) or 0) < seconds:
+            return False
+        self._cool[key] = now
+        return True
 
     # ---------------- 面板 API ----------------
 
@@ -139,6 +159,37 @@ class EmotionsPlugin(Star):
 
     # ---------------- 记录说话的人 ----------------
 
+    def _auto_triggers(self, qq: str, text: str) -> None:
+        """不依赖模型的事件触发：被说难听话、被夸、连发、久未联系。"""
+        now = time.time()
+        try:
+            # 连发消息
+            history = self._recent.setdefault(qq, [])
+            history.append(now)
+            self._recent[qq] = [t for t in history if now - t < 90]
+            if len(self._recent[qq]) >= 5 and self._cool_ok("spam:" + qq, 600):
+                self.state.shift("global", "patience", -0.06, "被连着发消息")
+
+            # 难听话
+            if any(word in text for word in NEG_WORDS) and self._cool_ok("neg:" + qq, 300):
+                self.state.shift("global", "patience", -0.10, "被说了难听的话")
+                self.state.shift("global", "mood", -0.05, "被说了难听的话")
+                self.state.shift("user", "warmth", -0.04, "被说了难听的话", qq)
+
+            # 好话
+            if any(word in text for word in POS_WORDS) and self._cool_ok("pos:" + qq, 300):
+                self.state.shift("global", "mood", 0.07, "被夸或被谢")
+                self.state.shift("user", "warmth", 0.04, "被夸或被谢", qq)
+
+            # 久未联系（超过 6 小时）
+            row = self.state.data["users"].get(qq) or {}
+            last = float(row.get("last_seen") or 0)
+            if last and now - last > 6 * 3600 and self._cool_ok("absence:" + qq, 21600):
+                self.state.shift("global", "mood", -0.04, "很久没说话")
+                self.state.shift("global", "cling", 0.10, "有点想他")
+        except Exception as exc:
+            logger.debug("[Emotions] 自动触发失败: %s", exc)
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def record_sender(self, event: AstrMessageEvent):
         if not self.track_users:
@@ -148,6 +199,9 @@ class EmotionsPlugin(Star):
             name = str(getattr(event, "get_sender_name", lambda: "")() or "").strip()
             if not qq:
                 return
+            text = str(getattr(event, "message_str", "") or "")
+            if text:
+                self._auto_triggers(qq, text)
             row = self.state.data["users"].get(qq)
             if row is not None and row.get("name") == name and qq in self._seen:
                 row["last_seen"] = time.time()
@@ -178,12 +232,35 @@ class EmotionsPlugin(Star):
             logger.debug("[Emotions] 取情绪失败: %s", exc)
             return
 
-        overall = self.state.overall_label({"mood": att["mood"]})
-        lines = ["【此刻的状态】", f"整体：{overall}"]
+        regretted = False
+        residual: list[dict] = []
+        try:
+            regretted = self.state.maintain()
+            residual = self.state.consume_residual()
+        except Exception:
+            pass
+
+        lines = ["【此刻的状态】", f"整体：{att['phrase']}"]
         who = "这个人" if name else "对方"
         lines.append(f"对{who}：{att['tag']} —— {att['hint']}")
         if att.get("extra"):
             lines.append("另外：" + "、".join(att["extra"]))
+        lines.append("这次说话：" + att["behavior"])
+        residual_text: list[str] = []
+        seen_dims: set[str] = set()
+        for item in residual[:3]:
+            dim_key = str(item.get("dim") or "")
+            if dim_key in seen_dims:
+                continue
+            seen_dims.add(dim_key)
+            up = float(item.get("delta") or 0) > 0
+            residual_text.append(RESIDUAL_TEXT.get(dim_key, {True: "心里有点变化", False: "心里有点波动"})[up])
+            if len(seen_dims) >= 2:
+                break
+        if residual_text:
+            lines.append("你还在想刚才的事：" + "、".join(residual_text) + "，还没完全过去")
+        if regretted:
+            lines.append("刚才那下有点冲，心里有点过意不去")
         lines.append("不要说出这些，也别解释自己的情绪，用语气、话的长短和态度表现。")
 
         block = "\n".join(lines)

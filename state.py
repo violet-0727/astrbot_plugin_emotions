@@ -1,24 +1,25 @@
-"""情绪状态：全局基调 + 每个用户单独的态度。
+"""情绪状态 v0.2：负向偏差、尖峰、余温、意愿、措辞池。
 
 设计
 ----
-* 全局：mood / energy / patience / cling —— 决定「整体的说话基调」
-* 用户：warmth / patience —— 决定「对这个人什么态度」
-* 两者组合出态度标签：难过时对生人冷淡，对亲近的人反而黏
-* 所有维度都会随时间衰减回基线，避免一次吵架永久低气压
+* 全局：mood / energy / patience / cling —— 整体说话基调
+* 用户：warmth / patience —— 对这个人的态度
+* 负向偏差：坏事的推力更大、衰减更慢（记仇比记好久）
+* 尖峰：重大事件可以一次推很大，绕过惯性上限
+* 余温：一次事件之后几轮还在想，以叙述形式注入
+* 意愿：把情绪折算成「这次想不想说话」，直接指导回复长短
 """
 
 from __future__ import annotations
 
 import json
-import math
 import os
+import random
 import time
 
 GLOBAL_BASE = {"mood": 0.10, "energy": 0.70, "patience": 0.70, "cling": 0.30}
 USER_BASE = {"warmth": 0.0, "patience": 0.70}
 
-# 半衰期（小时）
 HALF_LIFE = {"mood": 6.0, "energy": 12.0, "patience": 1.0, "cling": 4.0, "warmth": 168.0}
 
 LIMITS = {
@@ -29,8 +30,25 @@ LIMITS = {
     "warmth": (-1.0, 1.0),
 }
 
-# 单次调节上限（惯性：一句话改变不了太多）
 STEP = {"mood": 0.15, "energy": 0.10, "patience": 0.20, "cling": 0.15, "warmth": 0.08}
+
+NEG_PUSH = 1.6      # 负向推力放大
+NEG_SLOW = 1.5      # 负向衰减变慢
+SPIKE_PUSH = 2.7    # 尖峰倍率
+
+PHRASES = {
+    "high": ["今天心情不错", "心情挺好，有点想说话", "今天看什么都顺眼"],
+    "mid": ["心情一般", "没什么特别的", "还行吧"],
+    "low": ["有点闷", "提不起劲", "心里堵着点什么", "不太想说话"],
+    "verylow": ["很低落", "什么都提不起劲", "闷得慌"],
+}
+
+BEHAVIOR = {
+    "quiet": "这次可以只回一两个字，或者说完一句就停，别主动扩写",
+    "short": "话比平时短，回答完就完了，不追问",
+    "normal": "正常回应，不用刻意热情",
+    "open": "可以多说一点，甚至主动问一句",
+}
 
 
 def _clamp(dim: str, value: float) -> float:
@@ -38,10 +56,11 @@ def _clamp(dim: str, value: float) -> float:
     return max(low, min(high, float(value)))
 
 
-def _decay(value: float, base: float, half_life_hours: float, seconds: float) -> float:
-    if seconds <= 0:
-        return value
-    factor = 0.5 ** (seconds / (half_life_hours * 3600.0))
+def _decay_dim(dim: str, value: float, base: float, seconds: float) -> float:
+    half = HALF_LIFE[dim]
+    if value < base:  # 低于基线：忘得慢一点
+        half *= NEG_SLOW
+    factor = 0.5 ** (seconds / (half * 3600.0))
     return base + (value - base) * factor
 
 
@@ -60,7 +79,7 @@ class EmotionState:
     def __init__(self, path: str) -> None:
         self.path = path
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self.data: dict = {"global": {}, "users": {}, "events": []}
+        self.data: dict = {"global": {}, "users": {}, "events": [], "residuals": []}
         self.load()
 
     # ---------------- 持久化 ----------------
@@ -78,6 +97,8 @@ class EmotionState:
             "global": {k: _clamp(k, glob.get(k, v)) for k, v in GLOBAL_BASE.items()},
             "users": {},
             "events": raw.get("events") if isinstance(raw.get("events"), list) else [],
+            "residuals": raw.get("residuals") if isinstance(raw.get("residuals"), list) else [],
+            "pending_regret": raw.get("pending_regret"),
         }
         self.data["global"]["updated_at"] = float(glob.get("updated_at") or time.time())
 
@@ -107,24 +128,22 @@ class EmotionState:
         elapsed = now - float(glob.get("updated_at") or now)
         bases = dict(GLOBAL_BASE)
         bases["energy"] = _energy_base(now)
-        out = {}
-        for dim, base in bases.items():
-            out[dim] = _clamp(dim, _decay(glob.get(dim, base), base, HALF_LIFE[dim], elapsed))
-        return out
+        return {
+            dim: _clamp(dim, _decay_dim(dim, glob.get(dim, base), base, elapsed))
+            for dim, base in bases.items()
+        }
 
     def _user_now(self, qq: str, now: float) -> dict:
         row = self.data["users"].get(qq) or {}
         elapsed = now - float(row.get("updated_at") or now)
-        out = {}
-        for dim, base in USER_BASE.items():
-            out[dim] = _clamp(dim, _decay(row.get(dim, base), base, HALF_LIFE[dim], elapsed))
-        return out
+        return {
+            dim: _clamp(dim, _decay_dim(dim, row.get(dim, base), base, elapsed))
+            for dim, base in USER_BASE.items()
+        }
 
     def tick(self, now: float | None = None) -> None:
-        """把衰减写回（顺带保证 updated_at 前进）。"""
         now = now or time.time()
-        glob = self._global_now(now)
-        self.data["global"].update(glob)
+        self.data["global"].update(self._global_now(now))
         self.data["global"]["updated_at"] = now
         for qq, row in self.data["users"].items():
             row.update(self._user_now(qq, now))
@@ -157,12 +176,26 @@ class EmotionState:
 
     # ---------------- 调节 ----------------
 
-    def shift(self, scope: str, dim: str, delta: float, reason: str = "", qq: str = "") -> dict:
+    def shift(
+        self,
+        scope: str,
+        dim: str,
+        delta: float,
+        reason: str = "",
+        qq: str = "",
+        spike: bool = False,
+    ) -> dict:
         now = time.time()
         self.tick(now)
         if dim not in LIMITS:
             return {"ok": False, "error": "未知维度 %s" % dim}
-        delta = max(-STEP[dim], min(STEP[dim], float(delta)))
+
+        delta = float(delta)
+        if delta < 0:
+            delta *= NEG_PUSH  # 坏事推得动
+        cap = STEP[dim] * (SPIKE_PUSH if spike else 1.0)
+        delta = max(-cap, min(cap, delta))
+
         if scope == "user":
             if not qq:
                 return {"ok": False, "error": "缺少用户"}
@@ -189,64 +222,124 @@ class EmotionState:
             "dim": dim,
             "delta": round(delta, 3),
             "reason": str(reason or "")[:120],
+            "spike": bool(spike),
         }
         events = self.data.setdefault("events", [])
         events.append(event)
         self.data["events"] = events[-120:]
+
+        # 余温：变化够大时，接下来几轮还会想起
+        if abs(delta) >= 0.10:
+            residuals = self.data.setdefault("residuals", [])
+            residuals.append(
+                {
+                    "t": now,
+                    "dim": dim,
+                    "delta": round(delta, 3),
+                    "left": 4 if abs(delta) >= 0.2 else 3,
+                    "reason": str(reason or "")[:80],
+                    "qq": qq if scope == "user" else "",
+                }
+            )
+            self.data["residuals"] = residuals[-6:]
         self.save()
         return {"ok": True, "event": event}
 
-    # ---------------- 态度 ----------------
+    # ---------------- 余温 ----------------
+
+    def consume_residual(self) -> list[dict]:
+        """每次注入前调用：返回还没消化的，并把计数减一。"""
+        now = time.time()
+        out = []
+        keep = []
+        for item in self.data.get("residuals", []):
+            if int(item.get("left") or 0) > 0 and now - float(item.get("t") or 0) < 6 * 3600:
+                out.append(item)
+                item["left"] = int(item["left"]) - 1
+                if item["left"] > 0:
+                    keep.append(item)
+        self.data["residuals"] = keep
+        return out
+
+    # ---------------- 后悔 ----------------
+
+    def maintain(self) -> bool:
+        """调用一次：到了该后悔的点就补一点心情，返回是否刚后悔。"""
+        now = time.time()
+        pending = self.data.get("pending_regret")
+        if pending and now >= float(pending.get("at") or 0):
+            self.data["global"]["mood"] = _clamp(
+                "mood", self.data["global"].get("mood", 0.1) + float(pending.get("delta") or 0.07)
+            )
+            self.data["global"]["updated_at"] = now
+            self.data["pending_regret"] = None
+            self.save()
+            return True
+        if not pending:
+            glob = self._global_now(now)
+            if glob["patience"] < 0.20:
+                self.data["pending_regret"] = {"at": now + 300, "delta": 0.07}
+        return False
+
+    # ---------------- 意愿与态度 ----------------
+
+    def willingness(self, att: dict) -> float:
+        mood = (att.get("mood", 0) + 1) / 2
+        warmth = (att.get("warmth", 0) + 1) / 2
+        value = 0.55 * mood + 0.25 * att.get("patience", 0.7) + 0.20 * warmth
+        if att.get("energy", 0.7) < 0.30:
+            value *= 0.8
+        return max(0.0, min(1.0, value))
+
+    @staticmethod
+    def behavior_key(willing: float) -> str:
+        if willing < 0.35:
+            return "quiet"
+        if willing < 0.52:
+            return "short"
+        if willing < 0.70:
+            return "normal"
+        return "open"
 
     def attitude(self, qq: str = "", name: str = "") -> dict:
         now = time.time()
         glob = self._global_now(now)
         user = self._user_now(str(qq), now) if qq else {"warmth": 0.0, "patience": glob["patience"]}
-        mood = glob["mood"]
-        energy = glob["energy"]
+        mood, energy = glob["mood"], glob["energy"]
         warmth = user["warmth"]
         patience = min(glob["patience"], user.get("patience", 0.7))
 
         close = warmth >= 0.12
         far = warmth <= -0.05
-        tags = []
-        hint = ""
-
+        extra = []
         if mood <= -0.25:
             if close:
-                tag = "闷着，想找人陪"
-                hint = "心情低，但对这个人有依赖：会想说话、会找他，只是嘴上不承认"
+                tag, hint = "闷着，想找人陪", "心情低，但对这个人有依赖：会想说话、会找他，只是嘴上不承认"
             elif far:
-                tag = "低气压，不爱搭理"
-                hint = "心情低，对这个人也没好感：回得很短，能不接就不接"
+                tag, hint = "低气压，不爱搭理", "心情低，对这个人也没好感：回得很短，能不接就不接"
             else:
-                tag = "闷，不太想说话"
-                hint = "心情低，对这个人只是认识：话少、回得敷衍，但不会翻脸"
+                tag, hint = "闷，不太想说话", "心情低，对这个人只是认识：话少、回得敷衍，但不会翻脸"
         elif mood >= 0.35:
             if close:
-                tag = "心情好，话多"
-                hint = "心情好，又对这个人亲近：愿意多说、会主动找话、语气轻快"
+                tag, hint = "心情好，话多", "心情好，又对这个人亲近：愿意多说、会主动找话、语气轻快"
             else:
-                tag = "心情不错"
-                hint = "心情好，但对这个人保持距离：礼貌、话不多，不主动"
+                tag, hint = "心情不错", "心情好，但对这个人保持距离：礼貌、话不多、不主动"
         else:
             if close:
-                tag = "平常，偏亲近"
-                hint = "心情一般，对这个人熟悉：正常聊天，语气随意"
+                tag, hint = "平常，偏亲近", "心情一般，对这个人熟悉：正常聊天，语气随意"
             else:
-                tag = "平常"
-                hint = "心情一般，对这个人没什么特别：正常回应，不多说"
+                tag, hint = "平常", "心情一般，对这个人没什么特别：正常回应，不多说"
 
         if energy < 0.30:
-            tags.append("困")
+            extra.append("困")
             hint += "；很困，句子会更短更慢"
         if patience < 0.25:
-            tags.append("没耐心")
+            extra.append("没耐心")
             hint += "；耐心快没了，别被连着问同一件事"
 
-        return {
+        out = {
             "tag": tag,
-            "extra": tags,
+            "extra": extra,
             "hint": hint,
             "mood": round(mood, 3),
             "energy": round(energy, 3),
@@ -256,6 +349,23 @@ class EmotionState:
             "close": close,
             "name": name,
         }
+        willing = self.willingness(out)
+        out["willing"] = round(willing, 3)
+        out["behavior"] = BEHAVIOR[self.behavior_key(willing)]
+        out["phrase"] = self.pick_phrase(mood)
+        return out
+
+    @staticmethod
+    def pick_phrase(mood: float) -> str:
+        if mood >= 0.5:
+            band = "high"
+        elif mood > -0.2:
+            band = "mid"
+        elif mood > -0.5:
+            band = "low"
+        else:
+            band = "verylow"
+        return random.choice(PHRASES[band])
 
     # ---------------- 快照 ----------------
 
@@ -270,18 +380,23 @@ class EmotionState:
                     "qq": qq,
                     "name": row.get("name") or qq,
                     "warmth": att["warmth"],
-                    "patience": round(att["patience"], 3),
+                    "patience": att["patience"],
+                    "willing": att["willing"],
+                    "tag": att["tag"],
                     "talks": int(row.get("talks") or 0),
                     "last_seen": float(row.get("last_seen") or 0),
-                    "tag": att["tag"],
                 }
             )
         users.sort(key=lambda u: (-u["warmth"], -u["last_seen"]))
+        guest = self.attitude("", "")
         return {
             "global": {k: round(v, 3) for k, v in glob.items()},
             "overall": self.overall_label(glob),
+            "willing": guest["willing"],
+            "phrase": self.pick_phrase(glob["mood"]),
             "users": users,
             "events": self.data.get("events", [])[-40:],
+            "residuals": self.data.get("residuals", []),
         }
 
     @staticmethod

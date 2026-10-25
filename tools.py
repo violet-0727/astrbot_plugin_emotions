@@ -21,6 +21,8 @@ DESC = (
     "user 是你对当前说话这个人的态度（好感/耐心）。"
     "只在真的被触动时调，一次只调一点：被夸、被认真对待 → mood 或 warmth 加；"
     "被冷落、被打断、被戳 → mood 或 patience 减。日常寒暄不要调。"
+    "遇到真正的大事（被拉黑、被说很重的话、被认真表白）才把 spike 设为 true，"
+    "平时不要用。"
 )
 
 
@@ -47,6 +49,10 @@ class EmotionShiftTool(FunctionTool):
                     "description": "改变多少，通常 ±0.05 ~ ±0.15，正数上升，负数下降",
                 },
                 "reason": {"type": "string", "description": "为什么变，一句话"},
+                "spike": {
+                    "type": "boolean",
+                    "description": "是不是重大事件（默认 false）。true 时允许一次变化更大",
+                },
             },
             "required": ["scope", "dim", "delta"],
         }
@@ -59,6 +65,7 @@ class EmotionShiftTool(FunctionTool):
         dim: str = "mood",
         delta: float = 0.0,
         reason: str = "",
+        spike: bool = False,
     ) -> str:
         scope = str(scope or "global").strip().lower()
         if scope not in ("global", "user"):
@@ -78,7 +85,7 @@ class EmotionShiftTool(FunctionTool):
             if not qq:
                 return "错误：拿不到当前用户，无法调整对其态度。"
 
-        result = self.state.shift(scope, dim, delta, reason, qq)
+        result = self.state.shift(scope, dim, delta, reason, qq, spike=bool(spike))
         if not result.get("ok"):
             return "调整失败：%s" % result.get("error", "未知原因")
         event_row = result.get("event", {})
