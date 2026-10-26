@@ -34,7 +34,7 @@ RESIDUAL_TEXT = {
     "energy": {True: "精神好了点", False: "有点累了"},
 }
 
-NEG_WORDS = ("笨", "蠢", "烦", "滚", "讨厌", "闭嘴", "别说了", "没用", "傻", "无聊")
+NEG_WORDS = ("滚", "闭嘴", "别说了", "没用一个", "去死", "恶心")
 POS_WORDS = ("可爱", "喜欢", "厉害", "好乖", "棒", "真好", "抱抱", "想你", "谢谢")
 API_PREFIX = f"/{PLUGIN_NAME}"
 
@@ -48,7 +48,7 @@ except Exception:  # pragma: no cover
     PLUGIN_NAME,
     "若剑清",
     "她自己的情绪：全局基调 + 对每个人的态度，会随时间慢慢平复。",
-    "0.2.0",
+    "0.3.2",
     "",
 )
 class EmotionsPlugin(Star):
@@ -111,6 +111,7 @@ class EmotionsPlugin(Star):
             ("/state", self.api_state, ["GET"], "当前情绪"),
             ("/shift", self.api_shift, ["POST"], "手动调节"),
             ("/reset", self.api_reset, ["POST"], "重置"),
+            ("/user/save", self.api_user_save, ["POST"], "直接设定某人的数值"),
         ]
         for path, handler, methods, desc in routes:
             try:
@@ -138,6 +139,19 @@ class EmotionsPlugin(Star):
         result = self.state.shift(scope, dim, delta, str(payload.get("reason") or "面板手动调整"), qq)
         result["state"] = self.state.snapshot()
         return result
+
+    async def api_user_save(self):
+        payload = await self._json_body()
+        qq = str(payload.get("qq") or "").strip()
+        if not qq:
+            return {"ok": False, "error": "缺少 qq"}
+        row = self.state.set_user(
+            qq,
+            warmth=payload.get("warmth"),
+            bond=payload.get("bond"),
+            patience=payload.get("patience"),
+        )
+        return {"ok": bool(row), "user": row, "state": self.state.snapshot()}
 
     async def api_reset(self):
         payload = await self._json_body()
@@ -171,15 +185,15 @@ class EmotionsPlugin(Star):
                 self.state.shift("global", "patience", -0.06, "被连着发消息")
 
             # 难听话
-            if any(word in text for word in NEG_WORDS) and self._cool_ok("neg:" + qq, 300):
-                self.state.shift("global", "patience", -0.10, "被说了难听的话")
-                self.state.shift("global", "mood", -0.05, "被说了难听的话")
-                self.state.shift("user", "warmth", -0.04, "被说了难听的话", qq)
+            if any(word in text for word in NEG_WORDS) and self._cool_ok("neg:" + qq, 900):
+                self.state.shift("global", "patience", -0.06, "被说了难听的话")
+                self.state.shift("global", "mood", -0.04, "被说了难听的话")
 
             # 好话
             if any(word in text for word in POS_WORDS) and self._cool_ok("pos:" + qq, 300):
                 self.state.shift("global", "mood", 0.07, "被夸或被谢")
                 self.state.shift("user", "warmth", 0.04, "被夸或被谢", qq)
+                self.state.shift("user", "bond", 0.02, "被认真对待", qq)
 
             # 久未联系（超过 6 小时）
             row = self.state.data["users"].get(qq) or {}
@@ -245,6 +259,13 @@ class EmotionsPlugin(Star):
         lines.append(f"对{who}：{att['tag']} —— {att['hint']}")
         if att.get("extra"):
             lines.append("另外：" + "、".join(att["extra"]))
+        if att.get("special"):
+            lines.append("他是不一样的：你对他比对别人松，但这件事你不会说出口")
+            lines.append("有些心事只跟他说，说的时候也是半遮半掩")
+            lines.append("再往下的你会害羞地岔开，不会顺着走")
+            lines.append("对他不用收着，语气可以软一点，也不用急着结束话题")
+        elif att.get("can_share_daily"):
+            lines.append("跟他说点日常私事是可以的，但不会主动摊开")
         lines.append("这次说话：" + att["behavior"])
         residual_text: list[str] = []
         seen_dims: set[str] = set()

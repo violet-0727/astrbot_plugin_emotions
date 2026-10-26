@@ -18,9 +18,21 @@ import random
 import time
 
 GLOBAL_BASE = {"mood": 0.10, "energy": 0.70, "patience": 0.70, "cling": 0.30}
-USER_BASE = {"warmth": 0.0, "patience": 0.70}
+USER_BASE = {"warmth": 0.0, "patience": 0.70, "bond": 0.0}
 
-HALF_LIFE = {"mood": 6.0, "energy": 12.0, "patience": 1.0, "cling": 4.0, "warmth": 168.0}
+# 冷启动：聊得越多，好感/关系自然往上走（不依赖任何其它插件）
+WARMTH_TARGET_DIV = 300.0   # talks / 300 → 上限 0.6
+WARMTH_TARGET_CAP = 0.6
+BOND_TARGET_DIV = 250.0     # talks / 250 → 上限 0.8
+BOND_TARGET_CAP = 0.8
+GROW_STEP = 0.02            # 每条消息最多长这么多，慢一点更真
+
+# 关系分层
+BOND_FRIEND = 0.30          # 能说日常私事
+BOND_SPECIAL = 0.55         # 能说心事，且是「例外」
+
+HALF_LIFE = {"mood": 6.0, "energy": 12.0, "patience": 1.0, "cling": 4.0,
+             "warmth": 168.0, "bond": 1440.0}
 
 LIMITS = {
     "mood": (-1.0, 1.0),
@@ -28,9 +40,11 @@ LIMITS = {
     "patience": (0.0, 1.0),
     "cling": (0.0, 1.0),
     "warmth": (-1.0, 1.0),
+    "bond": (0.0, 1.0),
 }
 
-STEP = {"mood": 0.15, "energy": 0.10, "patience": 0.20, "cling": 0.15, "warmth": 0.08}
+STEP = {"mood": 0.15, "energy": 0.10, "patience": 0.20, "cling": 0.15,
+        "warmth": 0.08, "bond": 0.05}
 
 NEG_PUSH = 1.6      # 负向推力放大
 NEG_SLOW = 1.5      # 负向衰减变慢
@@ -45,9 +59,9 @@ PHRASES = {
 
 BEHAVIOR = {
     "quiet": "这次可以只回一两个字，或者说完一句就停，别主动扩写",
-    "short": "话比平时短，回答完就完了，不追问",
-    "normal": "正常回应，不用刻意热情",
-    "open": "可以多说一点，甚至主动问一句",
+    "short": "话比平时短，但语气不用冷，别催对方走",
+    "normal": "正常回应，语气自然，可以软一点",
+    "open": "可以多说一点，语气轻快些，也可以主动问一句",
 }
 
 
@@ -109,6 +123,7 @@ class EmotionState:
             self.data["users"][str(qq)] = {
                 "name": str(row.get("name") or "")[:40],
                 "warmth": _clamp("warmth", row.get("warmth", USER_BASE["warmth"])),
+                "bond": _clamp("bond", row.get("bond", USER_BASE["bond"])),
                 "patience": _clamp("patience", row.get("patience", USER_BASE["patience"])),
                 "last_seen": float(row.get("last_seen") or 0),
                 "updated_at": float(row.get("updated_at") or 0),
@@ -162,6 +177,7 @@ class EmotionState:
                 "name": str(name or "")[:40],
                 "warmth": USER_BASE["warmth"],
                 "patience": USER_BASE["patience"],
+                "bond": USER_BASE["bond"],
                 "last_seen": now,
                 "updated_at": now,
                 "talks": 0,
@@ -171,6 +187,14 @@ class EmotionState:
             row["name"] = str(name)[:40]
         row["last_seen"] = now
         row["talks"] = int(row.get("talks") or 0) + 1
+        talks = row["talks"]
+        # 聊得多，好感和关系慢慢往上走；只向上靠近，不因为一句不顺就掉
+        warmth_target = min(WARMTH_TARGET_CAP, talks / WARMTH_TARGET_DIV)
+        if float(row.get("warmth") or 0.0) < warmth_target:
+            row["warmth"] = _clamp("warmth", float(row.get("warmth") or 0.0) + GROW_STEP)
+        bond_target = min(BOND_TARGET_CAP, talks / BOND_TARGET_DIV)
+        if float(row.get("bond") or 0.0) < bond_target:
+            row["bond"] = _clamp("bond", float(row.get("bond") or 0.0) + GROW_STEP)
         self.save()
         return row
 
@@ -245,6 +269,25 @@ class EmotionState:
         self.save()
         return {"ok": True, "event": event}
 
+    def set_user(self, qq: str, **fields) -> dict | None:
+        """后台直接设定某个人的数值（面板用）。"""
+        qq = str(qq or "").strip()
+        if not qq:
+            return None
+        row = self.data["users"].get(qq)
+        if row is None:
+            self.touch_user(qq)
+            row = self.data["users"][qq]
+        for key in ("warmth", "bond", "patience"):
+            if key in fields and fields[key] is not None:
+                try:
+                    row[key] = _clamp(key, float(fields[key]))
+                except Exception:
+                    pass
+        row["updated_at"] = time.time()
+        self.save()
+        return dict(row)
+
     # ---------------- 余温 ----------------
 
     def consume_residual(self) -> list[dict]:
@@ -309,8 +352,10 @@ class EmotionState:
         warmth = user["warmth"]
         patience = min(glob["patience"], user.get("patience", 0.7))
 
-        close = warmth >= 0.12
+        bond = float(user.get("bond") or 0.0) if qq else 0.0
+        close = warmth >= 0.12 or bond >= BOND_FRIEND
         far = warmth <= -0.05
+        special = bond >= BOND_SPECIAL
         extra = []
         if mood <= -0.25:
             if close:
@@ -346,7 +391,11 @@ class EmotionState:
             "patience": round(patience, 3),
             "cling": round(glob["cling"], 3),
             "warmth": round(warmth, 3),
+            "bond": round(bond, 3),
             "close": close,
+            "special": special,
+            "can_share_daily": bond >= BOND_FRIEND,
+            "can_share_heart": bond >= BOND_SPECIAL,
             "name": name,
         }
         willing = self.willingness(out)
@@ -380,6 +429,8 @@ class EmotionState:
                     "qq": qq,
                     "name": row.get("name") or qq,
                     "warmth": att["warmth"],
+                    "bond": att["bond"],
+                    "special": att["special"],
                     "patience": att["patience"],
                     "willing": att["willing"],
                     "tag": att["tag"],

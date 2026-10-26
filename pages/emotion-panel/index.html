@@ -78,6 +78,13 @@
   .pline .track{flex:1;height:5px;border-radius:99px;background:var(--field);position:relative;overflow:hidden}
   .pline .track i{position:absolute;top:0;bottom:0;border-radius:99px;background:var(--accent);opacity:.75}
   .pline .track::after{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line)}
+  .pcard .ops{margin-top:8px;display:flex;gap:6px}
+  .pcard .ops button{padding:3px 9px;font-size:11.5px;border-radius:7px}
+  .pe{display:grid;grid-template-columns:44px 1fr 52px;gap:8px;align-items:center;margin-top:7px;font-size:12px}
+  .pe span{color:var(--muted)}
+  .pe b{text-align:right;font-variant-numeric:tabular-nums}
+  .more{display:flex;justify-content:center;margin-top:12px}
+  .more button{padding:6px 16px;font-size:12.5px}
 
   .timeline{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh);
     padding:8px 18px 8px 26px;position:relative}
@@ -164,6 +171,7 @@
   <div class="sec">
     <h3>对不同的人</h3>
     <div class="people" id="people"></div>
+    <div class="more" id="peopleMore" hidden></div>
     <div class="empty" id="peopleEmpty" hidden>还没有记录到的人。有人跟她说话之后，这里会出现。</div>
   </div>
 
@@ -205,6 +213,8 @@
   const API = "/astrbot_plugin_emotions";
   let bridge = null;
   let state = null;
+  let peopleExpanded = false;
+  let editingQQ = "";
 
   const $ = (id) => document.getElementById(id);
   const ep = (p) => String(p || "").replace(/^\/+/, "");
@@ -295,22 +305,41 @@
 
     const users = state.users || [];
     $("peopleEmpty").hidden = users.length > 0;
-    $("people").innerHTML = users.map((u) => {
+    const shown = peopleExpanded ? users : users.slice(0, 4);
+    $("people").innerHTML = shown.map((u) => {
+      if (editingQQ === u.qq) {
+        return '<div class="pcard" data-qq="' + esc(u.qq) + '">'
+          + '<div class="pav">' + esc((u.name || u.qq || "?").slice(0, 1)) + '</div>'
+          + '<div class="pinfo"><div class="pn"><b>' + esc(u.name || u.qq) + '</b><span>' + esc(u.qq) + '</span></div>'
+          + '<div class="pe"><span>好感</span><input type="range" data-k="warmth" min="-1" max="1" step="0.02" value="' + Number(u.warmth || 0) + '"><b>' + Number(u.warmth || 0).toFixed(2) + '</b></div>'
+          + '<div class="pe"><span>关系</span><input type="range" data-k="bond" min="0" max="1" step="0.02" value="' + Number(u.bond || 0) + '"><b>' + Number(u.bond || 0).toFixed(2) + '</b></div>'
+          + '<div class="pe"><span>耐心</span><input type="range" data-k="patience" min="0" max="1" step="0.02" value="' + Number(u.patience || 0) + '"><b>' + Number(u.patience || 0).toFixed(2) + '</b></div>'
+          + '<div class="ops"><button class="primary" data-act="save">保存</button>'
+          + '<button data-act="cancel">取消</button></div></div></div>';
+      }
       const w = Number(u.warmth || 0);
       const left = w >= 0 ? 50 : 50 + w * 50;
       const width = Math.abs(w) * 50;
-      return '<div class="pcard">'
+      return '<div class="pcard" data-qq="' + esc(u.qq) + '">'
         + '<div class="pav">' + esc((u.name || u.qq || "?").slice(0, 1)) + '</div>'
         + '<div class="pinfo">'
         + '<div class="pn"><b>' + esc(u.name || u.qq) + '</b><span>' + esc(u.qq) + '</span></div>'
-        + '<div class="ptag">' + esc(u.tag) + '</div>'
+        + '<div class="ptag">' + esc(u.tag) + (u.special ? " · 特殊" : "") + '</div>'
         + '<div class="pline"><span>好感</span>'
         + '<span class="track"><i style="left:' + left + '%;width:' + width + '%"></i></span>'
         + '<span>' + (w >= 0 ? "+" : "") + w.toFixed(2) + '</span></div>'
-        + '<div class="pline" style="margin-top:4px"><span>说过 ' + (u.talks || 0) + ' 次</span>'
-        + '<span style="margin-left:auto">' + ago(u.last_seen) + '</span></div>'
-        + '</div></div>';
+        + '<div class="pline" style="margin-top:4px"><span>关系 ' + Number(u.bond || 0).toFixed(2)
+        + '</span><span style="margin-left:auto">说过 ' + (u.talks || 0) + ' 次 · ' + ago(u.last_seen) + '</span></div>'
+        + '<div class="ops"><button data-act="edit">调整</button></div></div></div>';
     }).join("");
+
+    const more = $("peopleMore");
+    if (users.length > 4) {
+      more.hidden = false;
+      more.innerHTML = '<button id="btn-more">' + (peopleExpanded ? "收起" : "展开全部（" + users.length + " 人）") + '</button>';
+    } else {
+      more.hidden = true;
+    }
 
     const events = (state.events || []).slice().reverse();
     $("timeline").innerHTML = events.length ? events.map((e) => {
@@ -332,6 +361,31 @@
 
     $("updated").textContent = "更新于 " + clock(state.ts || Date.now() / 1000);
   }
+
+  document.getElementById("people").addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]");
+    const card = e.target.closest(".pcard");
+    if (!card) return;
+    const qq = card.dataset.qq;
+    if (!btn) return;
+    const act = btn.dataset.act;
+    if (act === "edit") { editingQQ = qq; render(); return; }
+    if (act === "cancel") { editingQQ = ""; render(); return; }
+    if (act === "save") {
+      const payload = { qq: qq };
+      card.querySelectorAll("input[data-k]").forEach((input) => {
+        payload[input.dataset.k] = Number(input.value);
+      });
+      const res = await post("user/save", payload);
+      if (res && res.ok) {
+        editingQQ = "";
+        state = Object.assign({ ok: true, ts: Date.now() / 1000 }, res.state || {});
+        render();
+        toast("改好了");
+      } else toast("保存失败", true);
+    }
+  });
+  document.getElementById("peopleMore").addEventListener("click", () => { peopleExpanded = !peopleExpanded; render(); });
 
   async function load() {
     try {

@@ -6,7 +6,7 @@ desc: >
   心情低 + 关系远 → 冷淡少理；心情低 + 关系近 → 黏人找安慰。
   所有维度按半衰期衰减回基线，一次吵架不会永久低气压；负向推力更大、衰减更慢（记仇比记好久）。
   注入走临时内容块，不改 system_prompt；自带情绪面板（心情环、精力/耐心/黏人、人物卡、变化时间线）。
-version: 0.2.0
+version: 0.3.2
 author: 若剑清
 repo: "https://github.com/violet-0727/astrbot_plugin_emotions"
 tags:
